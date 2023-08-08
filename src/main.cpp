@@ -15,13 +15,38 @@
 
 
 #include <Arduino.h>
+#include <WiFi.h>
 #include <Wire.h>
 #include "Adafruit_INA219.h"
+#include "ThingSpeak.h"
+
+
+const char *ssid = "SFR_EC58";                 // your network SSID (name)
+const char *password = "96wwza4yfz24qhtc4mxq"; // your network password
+
+WiFiClient client;
+
+unsigned long myChannelNumber = 1;
+const char *myWriteAPIKey = "QBVKQIKLXLKEVIAY";
 
 Adafruit_INA219 ina219;
 
+// sleep parameter
+
+const long uS_TO_S_FACTOR = 1000000;  /* Conversion factor for micro seconds to seconds */
+const int TIME_TO_SLEEP_DAY = 1 * 60; /* Time ESP32 will go to sleep (in seconds) */
+
 void setup() {
   // Open serial communications and wait for port to open:
+
+  pinMode(23, OUTPUT);
+  digitalWrite(23, HIGH);
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP_DAY * uS_TO_S_FACTOR);
+
+  WiFi.mode(WIFI_STA);
+
+  ThingSpeak.begin(client); // Initialize ThingSpeak
+
   Serial.begin(9600);
   while (!Serial) {
     ; // wait for serial port to connect. Needed for native USB port only
@@ -32,17 +57,23 @@ void setup() {
     while (1) { delay(10); }
   }
 
-  Serial.print("BV"); Serial.print("\t"); // Bus Voltage
-  Serial.print("SV"); Serial.print("\t"); // Shunt Voltage
-  Serial.print("LV"); Serial.print("\t"); // Load Voltage
-  Serial.print("C"); Serial.print("\t");  // Current
-  Serial.println("P");  // Power
-
-   pinMode(23, OUTPUT);
-   digitalWrite(23, HIGH);
 }
 
 void loop() {
+
+    // Connect or reconnect to WiFi
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print("Attempting to connect");
+    while (WiFi.status() != WL_CONNECTED)
+    {
+      WiFi.begin(ssid, password);
+      delay(5000);
+    }
+    Serial.println("\nConnected.");
+  }
+
+
   float shuntvoltage = 0;
   float busvoltage = 0;
   float current_mA = 0;
@@ -56,10 +87,34 @@ void loop() {
   loadvoltage = busvoltage + (shuntvoltage / 1000);
 
   Serial.print(busvoltage); Serial.print("\t"); 
-  Serial.print(shuntvoltage); Serial.print("\t");
-  Serial.print(loadvoltage); Serial.print("\t");
+  // Serial.print(shuntvoltage); Serial.print("\t");
+  // Serial.print(loadvoltage); Serial.print("\t");
   Serial.print(current_mA); Serial.print("\t");
-  Serial.println(power_mW);
+  // Serial.println(power_mW);
+
+
+  ThingSpeak.setField(1, busvoltage);
+  ThingSpeak.setField(2, current_mA);
+
+  // Write to ThingSpeak. There are up to 8 fields in a channel, allowing you to store up to 8 different
+  // pieces of information in a channel.  Here, we write to field 1.
+
+  int x = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
+
+  if (x == 200)
+  {
+    Serial.println("Channel update successful.");
+  }
+  else
+  {
+    Serial.println("Problem updating channel. HTTP error code " + String(x));
+  }
+
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+
+  delay(250);
+  esp_light_sleep_start();
 
   delay(1000);
 }
